@@ -120,29 +120,26 @@ Write-Host "Using mamba: $Mamba"
 Step 3 $TOTAL "Creating/updating env 'rpkm-workshop' (can take a few minutes)"
 & $Mamba env update -n rpkm-workshop -f $EnvYml --prune | Out-Host
 
-# Step 4/6: Smoke test + triage printout (via temp .py to avoid quoting issues)
+# Step 4/6: Smoke test + triage printout (no here-strings; avoids parsing/encoding issues)
 Step 4 $TOTAL "Smoke test + triage printout"
 
 $SmokePy = Join-Path $env:TEMP "bulk_seq_workshop_smoke_test.py"
-
-$SmokeText = @'
-import sys, platform
-import numpy, pandas, scipy, sklearn, matplotlib
-
-print("SMOKE TEST OK")
-print("PY:", sys.version.replace("\n"," "))
-print("PLATFORM:", platform.platform())
-print("numpy:", numpy.__version__)
-print("pandas:", pandas.__version__)
-print("scipy:", scipy.__version__)
-print("sklearn:", sklearn.__version__)
-print("matplotlib:", matplotlib.__version__)
-'@
-
-Set-Content -Path $SmokePy -Value $SmokeText -Encoding UTF8
+$SmokeLines = @(
+  'import sys, platform',
+  'import numpy, pandas, scipy, sklearn, matplotlib',
+  '',
+  'print("SMOKE TEST OK")',
+  'print("PY:", sys.version.replace("\n"," "))',
+  'print("PLATFORM:", platform.platform())',
+  'print("numpy:", numpy.__version__)',
+  'print("pandas:", pandas.__version__)',
+  'print("scipy:", scipy.__version__)',
+  'print("sklearn:", sklearn.__version__)',
+  'print("matplotlib:", matplotlib.__version__)'
+)
+Set-Content -Path $SmokePy -Value $SmokeLines -Encoding UTF8
 
 & $Conda run -n rpkm-workshop python $SmokePy | Out-Host
-
 # Step 5/6: Register kernel
 Step 5 $TOTAL "Registering Jupyter kernel 'rpkm-workshop'"
 & $Conda run -n rpkm-workshop python -m ipykernel install --user --name rpkm-workshop --display-name rpkm-workshop | Out-Host
