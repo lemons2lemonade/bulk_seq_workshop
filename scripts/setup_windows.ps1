@@ -13,7 +13,7 @@ Write-Host "Logging to: $LogFile"
 trap {
   Write-Host ""
   Write-Host "==============================================" -ForegroundColor Red
-  Write-Host "SETUP FAILED ❌" -ForegroundColor Red
+  Write-Host "SETUP FAILED" -ForegroundColor Red
   Write-Host "==============================================" -ForegroundColor Red
   Write-Host $_.Exception.Message -ForegroundColor Red
   Write-Host ""
