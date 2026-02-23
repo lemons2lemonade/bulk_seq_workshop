@@ -234,7 +234,12 @@ Write-Host "Using solver: $Mamba"
 
 # Step 3/6: Create/update env
 Step 3 $TOTAL "Creating/updating env 'rpkm-workshop' (can take a few minutes)"
-& $Mamba env update -n rpkm-workshop -f $EnvYml --prune | Out-Host
+
+if ($Mamba -like "*micromamba*") {
+  & $Mamba create -n rpkm-workshop -f $EnvYml -y | Out-Host
+} else {
+  & $Mamba env update -n rpkm-workshop -f $EnvYml --prune | Out-Host
+}
 
 # Step 4/6: Smoke test + triage printout
 Step 4 $TOTAL "Smoke test + triage printout"
