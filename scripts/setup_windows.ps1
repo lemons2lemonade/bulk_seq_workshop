@@ -1,21 +1,27 @@
 #requires -Version 5.1
-Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 
-# ----------------------------
-# Logging (always on)
-# ----------------------------
+# --- Always-on logging ---
 $LogDir = Join-Path $env:TEMP "bulk_seq_workshop_logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
-$LogFile = Join-Path $LogDir ("setup_{0:yyyyMMdd_HHmmss}.log" -f (Get-Date))
+$LogFile = Join-Path $LogDir ("setup_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
 Start-Transcript -Path $LogFile -Append | Out-Null
 Write-Host "Logging to: $LogFile"
 
-function Banner([string]$msg) {
+# --- Trap any error (keeps window open) ---
+trap {
   Write-Host ""
-  Write-Host "============================================================"
-  Write-Host $msg
-  Write-Host "============================================================"
+  Write-Host "==============================================" -ForegroundColor Red
+  Write-Host "SETUP FAILED ❌" -ForegroundColor Red
+  Write-Host "==============================================" -ForegroundColor Red
+  Write-Host $_.Exception.Message -ForegroundColor Red
+  Write-Host ""
+  Write-Host "Log saved at: $LogFile" -ForegroundColor Yellow
+  try { Stop-Transcript | Out-Null } catch {}
+  Write-Host "Press Enter to close..." -ForegroundColor Yellow
+  [void](Read-Host)
+  exit 1
 }
 
 function Step([int]$i, [int]$n, [string]$msg) {
@@ -24,187 +30,119 @@ function Step([int]$i, [int]$n, [string]$msg) {
   Write-Host "------------------------------------------------------------"
 }
 
-function Success([string]$msg) {
+function Banner([string]$msg) {
   Write-Host ""
-  Write-Host "============================================================" -ForegroundColor Green
-  Write-Host ("SUCCESS ✅  {0}" -f $msg) -ForegroundColor Green
-  Write-Host "============================================================" -ForegroundColor Green
+  Write-Host "============================================================"
+  Write-Host $msg
+  Write-Host "============================================================"
 }
 
-function Fail([string]$msg) {
-  throw $msg
-}
+# --- Resolve paths ---
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot  = Resolve-Path (Join-Path $ScriptDir "..") | Select-Object -ExpandProperty Path
 
-function Diagnostics([string]$RepoRoot, [string]$EnvYml, [string]$Notebook) {
-  Banner "Diagnostics (Windows)"
-  try {
-    $os = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption
-  } catch {
-    $os = "Windows (unable to query Win32_OperatingSystem)"
-  }
-  Write-Host ("OS: {0}" -f $os)
-  Write-Host ("Version: {0}" -f ([System.Environment]::OSVersion.VersionString))
-  Write-Host ("PowerShell: {0}" -f $PSVersionTable.PSVersion)
-  Write-Host ("User: {0}" -f $env:USERNAME)
-  Write-Host ("Repo root: {0}" -f $RepoRoot)
-  Write-Host ("Env file:  {0}" -f $EnvYml)
-  Write-Host ("Notebook:  {0}" -f $Notebook)
+$EnvYml   = Join-Path $RepoRoot "environment.workshop.yml"
+$Notebook = Join-Path $RepoRoot "notebooks\workshop.ipynb"
 
-  # DNS sanity check (GitHub reachability)
-  try {
-    $null = Resolve-DnsName "github.com" -ErrorAction Stop
-    Write-Host "Network/DNS: OK (github.com resolves)"
-  } catch {
-    Fail "Network/DNS check failed: cannot resolve github.com. Are you offline or behind restrictive DNS?"
-  }
-}
+if (!(Test-Path $EnvYml))   { throw "Missing environment file: $EnvYml" }
+if (!(Test-Path $Notebook)) { throw "Missing notebook: $Notebook" }
 
+Banner "Workshop setup (Windows) — automatic install + env + Jupyter"
+
+# --- Diagnostics ---
+Write-Host "Repo root: $RepoRoot"
+Write-Host "Env file:  $EnvYml"
+Write-Host "Notebook:  $Notebook"
+Write-Host ("PowerShell: {0}" -f $PSVersionTable.PSVersion)
 try {
-  Banner "Workshop setup (Windows) — automatic install + env + Jupyter"
-
-  # ----------------------------
-  # Paths / constants
-  # ----------------------------
-  $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-  $RepoRoot  = Resolve-Path (Join-Path $ScriptDir "..") | Select-Object -ExpandProperty Path
-
-  $EnvYml      = Join-Path $RepoRoot "environment.workshop.yml"
-  $EnvName     = "rpkm-workshop"
-  $KernelName  = "rpkm-workshop"
-  $KernelDisp  = "rpkm-workshop"
-  $NotebookRel = "notebooks\workshop.ipynb"
-  $Notebook    = Join-Path $RepoRoot $NotebookRel
-
-  $MiniforgeDir = Join-Path $env:USERPROFILE "miniforge3"
-  $CondaExe     = Join-Path $MiniforgeDir "Scripts\conda.exe"
-
-  if (!(Test-Path $EnvYml))   { Fail "Missing environment file: $EnvYml" }
-  if (!(Test-Path $Notebook)) { Fail "Missing notebook: $Notebook" }
-
-  Diagnostics $RepoRoot $EnvYml $Notebook
-
-  $TOTAL_STEPS = 6
-
-  # ----------------------------
-  # Step 1/6 — Ensure conda exists (install Miniforge if needed)
-  # ----------------------------
-  Step 1 $TOTAL_STEPS "Ensuring conda is available (Miniforge if needed)"
-
-  $CondaCmd = $null
-  if (Get-Command conda -ErrorAction SilentlyContinue) {
-    $CondaCmd = "conda"
-  } elseif (Test-Path $CondaExe) {
-    $CondaCmd = $CondaExe
-  } else {
-    Write-Host "conda not found — installing Miniforge (no admin required)"
-
-    $Installer = Join-Path $env:TEMP "Miniforge3-Windows-x86_64.exe"
-    $Url = "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe"
-    Invoke-WebRequest -Uri $Url -OutFile $Installer
-
-    # Run silent installer; /D must be last and no quotes around it
-    $args = @("/S", "/D=$MiniforgeDir")
-    $p = Start-Process -FilePath $Installer -ArgumentList $args -Wait -PassThru
-
-    if ($p.ExitCode -ne 0) { Fail "Miniforge installer failed with exit code $($p.ExitCode)" }
-    if (!(Test-Path $CondaExe)) { Fail "Miniforge install completed but conda not found at $CondaExe" }
-
-    $CondaCmd = $CondaExe
-  }
-
-  Write-Host "Using conda: $CondaCmd"
-  Write-Host "conda version:" (& $CondaCmd --version)
-
-  # ----------------------------
-  # Step 2/6 — Ensure mamba exists (install only if missing)
-  # ----------------------------
-  Step 2 $TOTAL_STEPS "Ensuring mamba is available (install only if missing)"
-
-  $MambaExe = $null
-  if (Get-Command mamba -ErrorAction SilentlyContinue) {
-    $MambaExe = "mamba"
-  } else {
-    $BasePrefix = & $CondaCmd info --base
-    $Candidate  = Join-Path $BasePrefix "Scripts\mamba.exe"
-
-    if (Test-Path $Candidate) {
-      $MambaExe = $Candidate
-    } else {
-      Write-Host "mamba not found — installing into base env"
-      & $CondaCmd install -n base -c conda-forge -y mamba | Out-Host
-
-      if (Test-Path $Candidate) {
-        $MambaExe = $Candidate
-      } elseif (Get-Command mamba -ErrorAction SilentlyContinue) {
-        $MambaExe = "mamba"
-      } else {
-        Fail "mamba installation failed"
-      }
-    }
-  }
-
-  Write-Host "Using mamba: $MambaExe"
-  Write-Host "mamba version:" (& $MambaExe --version)
-
-  # ----------------------------
-  # Step 3/6 — Create/update environment
-  # ----------------------------
-  Step 3 $TOTAL_STEPS "Creating/updating env '$EnvName' from environment.workshop.yml (can take a few minutes)"
-  & $MambaExe env update -n $EnvName -f $EnvYml --prune | Out-Host
-
-  # ----------------------------
-  # Step 4/6 — Smoke test + triage printout
-  # ----------------------------
-  Step 4 $TOTAL_STEPS "Smoke test + triage printout"
-
-  $Py = @(
-    "import sys, platform",
-    "import numpy, pandas, scipy, sklearn, matplotlib",
-    "print('SMOKE TEST OK')",
-    "print('PY:', sys.version.replace('\n',' '))",
-    "print('PLATFORM:', platform.platform())",
-    "print('numpy:', numpy.__version__)",
-    "print('pandas:', pandas.__version__)",
-    "print('scipy:', scipy.__version__)",
-    "print('sklearn:', sklearn.__version__)",
-    "print('matplotlib:', matplotlib.__version__)"
-  ) -join "; "
-
-  & $CondaCmd run -n $EnvName python -c $Py | Out-Host
-
-  # ----------------------------
-  # Step 5/6 — Register Jupyter kernel
-  # ----------------------------
-  Step 5 $TOTAL_STEPS "Registering Jupyter kernel '$KernelDisp'"
-  & $CondaCmd run -n $EnvName python -m ipykernel install --user --name $KernelName --display-name $KernelDisp | Out-Host
-
-  # ----------------------------
-  # Step 6/6 — Launch JupyterLab + open notebook
-  # ----------------------------
-  Step 6 $TOTAL_STEPS "Launching JupyterLab + opening notebooks/workshop.ipynb"
-  Success "Environment ready. Launching the notebook now…"
-
-  Set-Location $RepoRoot
-  & $CondaCmd run -n $EnvName jupyter lab $Notebook
-
-  # If Jupyter exits, we still keep the window open so people can see logs.
-  Write-Host ""
-  Write-Host "Jupyter exited. Log saved at: $LogFile" -ForegroundColor Yellow
-  Write-Host "Press Enter to close..." -ForegroundColor Yellow
-  [void] (Read-Host)
-
+  $null = Resolve-DnsName "github.com" -ErrorAction Stop
+  Write-Host "Network/DNS: OK (github.com resolves)"
 } catch {
-  Write-Host ""
-  Write-Host "============================================================" -ForegroundColor Red
-  Write-Host "SETUP FAILED ❌" -ForegroundColor Red
-  Write-Host "============================================================" -ForegroundColor Red
-  Write-Host $_.Exception.Message -ForegroundColor Red
-  Write-Host ""
-  Write-Host ("Full log saved at: {0}" -f $LogFile) -ForegroundColor Yellow
-  Write-Host "Press Enter to close..." -ForegroundColor Yellow
-  try { Stop-Transcript | Out-Null } catch {}
-  [void] (Read-Host)
-  exit 1
-} finally {
-  try { Stop-Transcript | Out-Null } catch {}
+  throw "Network/DNS check failed: cannot resolve github.com."
 }
+
+$TOTAL = 6
+
+# Step 1/6: Ensure conda (install Miniforge if missing)
+Step 1 $TOTAL "Ensuring conda is available (Miniforge if needed)"
+$MiniforgeDir = Join-Path $env:USERPROFILE "miniforge3"
+$CondaExe      = Join-Path $MiniforgeDir "Scripts\conda.exe"
+
+$Conda = $null
+if (Get-Command conda -ErrorAction SilentlyContinue) {
+  $Conda = "conda"
+} elseif (Test-Path $CondaExe) {
+  $Conda = $CondaExe
+} else {
+  Write-Host "conda not found — installing Miniforge (no admin required)"
+  $Installer = Join-Path $env:TEMP "Miniforge3-Windows-x86_64.exe"
+  $Url = "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe"
+  Invoke-WebRequest -Uri $Url -OutFile $Installer
+
+  $p = Start-Process -FilePath $Installer -ArgumentList @("/S", "/D=$MiniforgeDir") -Wait -PassThru
+  if ($p.ExitCode -ne 0) { throw "Miniforge installer failed with exit code $($p.ExitCode)" }
+  if (!(Test-Path $CondaExe)) { throw "Miniforge installed but conda not found at $CondaExe" }
+
+  $Conda = $CondaExe
+}
+
+Write-Host "Using conda: $Conda"
+& $Conda --version | Out-Host
+
+# Step 2/6: Ensure mamba (install only if missing)
+Step 2 $TOTAL "Ensuring mamba is available (install only if missing)"
+$Mamba = $null
+if (Get-Command mamba -ErrorAction SilentlyContinue) {
+  $Mamba = "mamba"
+} else {
+  $BasePrefix = & $Conda info --base
+  $Candidate  = Join-Path $BasePrefix "Scripts\mamba.exe"
+  if (Test-Path $Candidate) {
+    $Mamba = $Candidate
+  } else {
+    Write-Host "mamba not found — installing into base env"
+    & $Conda install -n base -c conda-forge -y mamba | Out-Host
+    if (Test-Path $Candidate) { $Mamba = $Candidate } else { throw "mamba installation failed" }
+  }
+}
+
+Write-Host "Using mamba: $Mamba"
+& $Mamba --version | Out-Host
+
+# Step 3/6: Create/update env
+Step 3 $TOTAL "Creating/updating env 'rpkm-workshop' (can take a few minutes)"
+& $Mamba env update -n rpkm-workshop -f $EnvYml --prune | Out-Host
+
+# Step 4/6: Smoke test + triage printout
+Step 4 $TOTAL "Smoke test + triage printout"
+$Py = @(
+  "import sys, platform",
+  "import numpy, pandas, scipy, sklearn, matplotlib",
+  "print('SMOKE TEST OK')",
+  "print('PY:', sys.version.replace('\n',' '))",
+  "print('PLATFORM:', platform.platform())",
+  "print('numpy:', numpy.__version__)",
+  "print('pandas:', pandas.__version__)",
+  "print('scipy:', scipy.__version__)",
+  "print('sklearn:', sklearn.__version__)",
+  "print('matplotlib:', matplotlib.__version__)"
+) -join "; "
+& $Conda run -n rpkm-workshop python -c $Py | Out-Host
+
+# Step 5/6: Register kernel
+Step 5 $TOTAL "Registering Jupyter kernel 'rpkm-workshop'"
+& $Conda run -n rpkm-workshop python -m ipykernel install --user --name rpkm-workshop --display-name rpkm-workshop | Out-Host
+
+# Step 6/6: Launch JupyterLab + notebook
+Step 6 $TOTAL "Launching JupyterLab + opening notebooks/workshop.ipynb"
+Write-Host ""
+Write-Host "SUCCESS ✅ Environment ready. Launching the notebook now…" -ForegroundColor Green
+
+Set-Location $RepoRoot
+& $Conda run -n rpkm-workshop jupyter lab $Notebook
+
+Write-Host ""
+Write-Host "Jupyter exited. Log saved at: $LogFile" -ForegroundColor Yellow
+try { Stop-Transcript | Out-Host } catch {}
+Write-Host "Press Enter to close..." -ForegroundColor Yellow
+[void](Read-Host)
