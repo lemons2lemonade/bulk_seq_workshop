@@ -57,11 +57,8 @@ From inside the repository folder:
 🪟 Windows
 Double-click:
 
-```scripts\setup_windows.ps1```
-
-If Windows blocks it, copy-paste once into PowerShell:
-
-```powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1```
+```scripts\setup_windows.bat```
+Do not run as Administrator.
 
 🍎 macOS
 Double-click:
