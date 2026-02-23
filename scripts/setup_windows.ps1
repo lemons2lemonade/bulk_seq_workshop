@@ -125,7 +125,7 @@ Step 4 $TOTAL "Smoke test + triage printout"
 
 $SmokePy = Join-Path $env:TEMP "bulk_seq_workshop_smoke_test.py"
 
-@'
+$SmokeText = @'
 import sys, platform
 import numpy, pandas, scipy, sklearn, matplotlib
 
@@ -137,7 +137,9 @@ print("pandas:", pandas.__version__)
 print("scipy:", scipy.__version__)
 print("sklearn:", sklearn.__version__)
 print("matplotlib:", matplotlib.__version__)
-'@ | Set-Content -Encoding UTF8 $SmokePy
+'@
+
+Set-Content -Path $SmokePy -Value $SmokeText -Encoding UTF8
 
 & $Conda run -n rpkm-workshop python $SmokePy | Out-Host
 
@@ -148,7 +150,7 @@ Step 5 $TOTAL "Registering Jupyter kernel 'rpkm-workshop'"
 # Step 6/6: Launch JupyterLab + notebook
 Step 6 $TOTAL "Launching JupyterLab + opening notebooks/workshop.ipynb"
 Write-Host ""
-Write-Host "SUCCESS ✅ Environment ready. Launching the notebook now…" -ForegroundColor Green
+Write-Host "SUCCESS - Environment ready. Launching the notebook now…" -ForegroundColor Green
 
 Set-Location $RepoRoot
 & $Conda run -n rpkm-workshop jupyter lab $Notebook
