@@ -1,0 +1,30 @@
+name: rpkm-workshop
+channels:
+  - conda-forge
+dependencies:
+  # Core language
+  - python=3.11
+
+  # Numerical + stats
+  - numpy
+  - pandas
+  - scipy
+  - statsmodels
+
+  # ML / decomposition
+  - scikit-learn
+
+  # Single-cell ecosystem
+  - anndata
+  - scanpy
+  - umap-learn
+  - pynndescent
+
+  # Plotting
+  - matplotlib
+  - seaborn
+
+  # Notebooks
+  - jupyter
+  - nbformat
+  - ipykernel
