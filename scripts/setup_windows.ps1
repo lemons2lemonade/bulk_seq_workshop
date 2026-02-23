@@ -74,12 +74,23 @@ function Ensure-ParentDir([string]$Path) {
   }
 }
 
+function Run-Exe([string]$Label, [string]$Exe, [string[]]$Args) {
+  Write-Host ">> $Label"
+  & $Exe @Args | Out-Host
+  if ($LASTEXITCODE -ne 0) {
+    throw "$Label failed (exit code $LASTEXITCODE)"
+  }
+}
+
 # --- Paths & inputs ---
 $EnvYml   = Join-Path $RepoRoot "environment.workshop.yml"
 $Notebook = Join-Path $RepoRoot "notebooks\workshop.ipynb"
 
 if (!(Test-Path $EnvYml))   { throw "Missing environment file: $EnvYml" }
 if (!(Test-Path $Notebook)) { throw "Missing notebook: $Notebook" }
+
+# Environment name MUST match environment.workshop.yml "name:"
+$EnvName = "rpkm-workshop"
 
 Banner "Workshop setup (Windows) - automatic install + env + Jupyter"
 Write-Host "Repo root: $RepoRoot"
@@ -91,7 +102,7 @@ Write-Host ("PowerShell: {0}" -f $PSVersionTable.PSVersion)
 $IsAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
            ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if ($IsAdmin) {
-  throw "Please do NOT run as Administrator. Close this window and run setup_windows.bat normally (per-user install)."
+  throw "Please do NOT run as Administrator. Close this window and run setup normally (per-user install)."
 }
 
 # --- DNS sanity check ---
@@ -136,10 +147,10 @@ if (-not $Conda) {
     Quarantine-Dir $MiniforgeDir
   }
 
-  # Quarantine old user-profile installs (commonly created before we switched away from spaces)
+  # Quarantine old user-profile installs
   foreach ($p in @($UserProfileMiniforge, $UserProfileMambaforge, $UserProfileMiniconda, $UserProfileAnaconda)) {
     if (Test-Path $p) {
-      Write-Host "Detected old conda install in user profile (may contain spaces): $p" -ForegroundColor Yellow
+      Write-Host "Detected old conda install in user profile: $p" -ForegroundColor Yellow
       Quarantine-Dir $p
     }
   }
@@ -155,10 +166,8 @@ if (-not $Conda) {
   $Installer = Join-Path $TmpRoot "Miniforge3-Windows-x86_64.exe"
   $Url = "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe"
 
-  # If an old/partial installer exists, remove it
   if (Test-Path $Installer) {
     $len = (Get-Item $Installer).Length
-    # Typical installer is much larger than 10MB; conservative threshold
     if ($len -lt 10MB) {
       Write-Host "Found existing installer but it looks incomplete ($len bytes). Removing..." -ForegroundColor Yellow
       Remove-Item -Force $Installer
@@ -170,7 +179,6 @@ if (-not $Conda) {
     Invoke-WebRequest -Uri $Url -OutFile $Installer
   }
 
-  # Ensure install parent exists
   Ensure-ParentDir $MiniforgeDir
 
   Write-Host "Running installer..."
@@ -183,6 +191,7 @@ if (-not $Conda) {
 
 Write-Host "Using conda: $Conda"
 & $Conda --version | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "conda version check failed (exit code $LASTEXITCODE)" }
 
 # Step 2/6: Ensure mamba (install only if missing)
 Step 2 $TOTAL "Ensuring mamba is available (install only if missing)"
@@ -191,9 +200,7 @@ function Find-Mamba([string]$BasePrefix) {
   $candidates = @(
     (Join-Path $BasePrefix "Scripts\mamba.exe"),
     (Join-Path $BasePrefix "Library\bin\mamba.exe"),
-    (Join-Path $BasePrefix "condabin\mamba.bat"),
-    (Join-Path $BasePrefix "Scripts\micromamba.exe"),
-    (Join-Path $BasePrefix "Library\bin\micromamba.exe")
+    (Join-Path $BasePrefix "condabin\mamba.bat")
   )
   foreach ($c in $candidates) {
     if (Test-Path $c) { return $c }
@@ -201,44 +208,45 @@ function Find-Mamba([string]$BasePrefix) {
   return $null
 }
 
+$BasePrefix = & $Conda info --base
 $Mamba = $null
 
-# If mamba is already on PATH, use it
 if (Get-Command mamba -ErrorAction SilentlyContinue) {
   $Mamba = "mamba"
 } else {
-  $BasePrefix = & $Conda info --base
   $Mamba = Find-Mamba $BasePrefix
-
   if (-not $Mamba) {
     Write-Host "mamba not found - installing into base env"
-    & $Conda install -n base -c conda-forge -y mamba | Out-Host
-
-    # Re-check after install
+    Run-Exe "conda install mamba" $Conda @("install","-n","base","-c","conda-forge","-y","mamba")
     $Mamba = Find-Mamba $BasePrefix
     if (-not $Mamba) {
-      # Try installing micromamba as a backup (very common on conda-forge)
-      Write-Host "mamba still not found - trying micromamba fallback" -ForegroundColor Yellow
-      & $Conda install -n base -c conda-forge -y micromamba | Out-Host
-      $Mamba = Find-Mamba $BasePrefix
-    }
-
-    if (-not $Mamba) {
-      throw "mamba/micromamba install completed but executable was not found under base prefix: $BasePrefix"
+      throw "mamba install reported success but executable was not found under base prefix: $BasePrefix"
     }
   }
 }
 
 Write-Host "Using solver: $Mamba"
 & $Mamba --version | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "mamba version check failed (exit code $LASTEXITCODE)" }
 
 # Step 3/6: Create/update env
-Step 3 $TOTAL "Creating/updating env 'rpkm-workshop' (can take a few minutes)"
+Step 3 $TOTAL "Creating/updating env '$EnvName' (can take a few minutes)"
 
-if ($Mamba -like "*micromamba*") {
-  & $Mamba create -n rpkm-workshop -f $EnvYml -y | Out-Host
+$EnvPrefix = Join-Path $BasePrefix ("envs\{0}" -f $EnvName)
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $EnvPrefix) | Out-Null
+
+# IMPORTANT: YAML already contains name: rpkm-workshop
+# Use -f only; do NOT pass -n (prevents name mismatch issues)
+if (Test-Path $EnvPrefix) {
+  Write-Host "Environment exists at: $EnvPrefix"
+  Run-Exe "mamba env update" $Mamba @("env","update","-f",$EnvYml,"--prune")
 } else {
-  & $Mamba env update -n rpkm-workshop -f $EnvYml --prune | Out-Host
+  Write-Host "Environment not found; creating from YAML: $EnvYml"
+  Run-Exe "mamba env create" $Mamba @("env","create","-f",$EnvYml)
+}
+
+if (!(Test-Path $EnvPrefix)) {
+  throw "Environment creation/update did not produce expected prefix: $EnvPrefix"
 }
 
 # Step 4/6: Smoke test + triage printout
@@ -248,6 +256,7 @@ $SmokePy = Join-Path $TmpRoot "bulk_seq_workshop_smoke_test.py"
 $SmokeLines = @(
   'import sys, platform',
   'import numpy, pandas, scipy, sklearn, matplotlib',
+  'import anndata, scanpy, umap, pynndescent, statsmodels',
   '',
   'print("SMOKE TEST OK")',
   'print("PY:", sys.version.replace("\n"," "))',
@@ -256,22 +265,31 @@ $SmokeLines = @(
   'print("pandas:", pandas.__version__)',
   'print("scipy:", scipy.__version__)',
   'print("sklearn:", sklearn.__version__)',
-  'print("matplotlib:", matplotlib.__version__)'
+  'print("matplotlib:", matplotlib.__version__)',
+  'print("scanpy:", scanpy.__version__)',
+  'print("anndata:", anndata.__version__)',
+  'print("umap:", umap.__version__)',
+  'print("pynndescent:", pynndescent.__version__)',
+  'print("statsmodels:", statsmodels.__version__)'
 )
 Set-Content -Path $SmokePy -Value $SmokeLines -Encoding UTF8
-& $Conda run -n rpkm-workshop python $SmokePy | Out-Host
+
+Run-Exe "conda run smoke test" $Conda @("run","-n",$EnvName,"python",$SmokePy)
 
 # Step 5/6: Register kernel
-Step 5 $TOTAL "Registering Jupyter kernel 'rpkm-workshop'"
-& $Conda run -n rpkm-workshop python -m ipykernel install --user --name rpkm-workshop --display-name rpkm-workshop | Out-Host
+Step 5 $TOTAL "Registering Jupyter kernel '$EnvName'"
+Run-Exe "ipykernel install" $Conda @("run","-n",$EnvName,"python","-m","ipykernel","install","--user","--name",$EnvName,"--display-name",$EnvName)
 
 # Step 6/6: Launch JupyterLab + notebook
 Step 6 $TOTAL "Launching JupyterLab + opening notebooks/workshop.ipynb"
 Write-Host ""
+
+Run-Exe "conda run sanity" $Conda @("run","-n",$EnvName,"python","-c","import sys; print('Python OK:', sys.version.split()[0])")
+
 Write-Host "SUCCESS - Environment ready. Launching the notebook now..." -ForegroundColor Green
 
 Set-Location $RepoRoot
-& $Conda run -n rpkm-workshop jupyter lab $Notebook
+Run-Exe "jupyter lab" $Conda @("run","-n",$EnvName,"jupyter","lab",$Notebook)
 
 Write-Host ""
 Write-Host "Jupyter exited. Log saved at: $LogFile" -ForegroundColor Yellow
