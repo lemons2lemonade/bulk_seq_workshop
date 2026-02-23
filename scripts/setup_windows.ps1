@@ -48,12 +48,12 @@ if (!(Test-Path $EnvYml))   { throw "Missing environment file: $EnvYml" }
 if (!(Test-Path $Notebook)) { throw "Missing notebook: $Notebook" }
 
 Banner "Workshop setup (Windows) — automatic install + env + Jupyter"
-
-# --- Diagnostics ---
 Write-Host "Repo root: $RepoRoot"
 Write-Host "Env file:  $EnvYml"
 Write-Host "Notebook:  $Notebook"
 Write-Host ("PowerShell: {0}" -f $PSVersionTable.PSVersion)
+
+# --- DNS sanity check ---
 try {
   $null = Resolve-DnsName "github.com" -ErrorAction Stop
   Write-Host "Network/DNS: OK (github.com resolves)"
@@ -113,21 +113,23 @@ Write-Host "Using mamba: $Mamba"
 Step 3 $TOTAL "Creating/updating env 'rpkm-workshop' (can take a few minutes)"
 & $Mamba env update -n rpkm-workshop -f $EnvYml --prune | Out-Host
 
-# Step 4/6: Smoke test + triage printout
+# Step 4/6: Smoke test + triage printout (via temp .py to avoid quoting issues)
 Step 4 $TOTAL "Smoke test + triage printout"
-$Py = @(
-  "import sys, platform",
-  "import numpy, pandas, scipy, sklearn, matplotlib",
-  "print('SMOKE TEST OK')",
-  "print('PY:', sys.version.replace('\n',' '))",
-  "print('PLATFORM:', platform.platform())",
-  "print('numpy:', numpy.__version__)",
-  "print('pandas:', pandas.__version__)",
-  "print('scipy:', scipy.__version__)",
-  "print('sklearn:', sklearn.__version__)",
-  "print('matplotlib:', matplotlib.__version__)"
-) -join "; "
-& $Conda run -n rpkm-workshop python -c $Py | Out-Host
+$SmokePy = Join-Path $env:TEMP "bulk_seq_workshop_smoke_test.py"
+@"
+import sys, platform
+import numpy, pandas, scipy, sklearn, matplotlib
+print("SMOKE TEST OK")
+print("PY:", sys.version.replace("\\n"," "))
+print("PLATFORM:", platform.platform())
+print("numpy:", numpy.__version__)
+print("pandas:", pandas.__version__)
+print("scipy:", scipy.__version__)
+print("sklearn:", sklearn.__version__)
+print("matplotlib:", matplotlib.__version__)
+"@ | Set-Content -Encoding UTF8 $SmokePy
+
+& $Conda run -n rpkm-workshop python $SmokePy | Out-Host
 
 # Step 5/6: Register kernel
 Step 5 $TOTAL "Registering Jupyter kernel 'rpkm-workshop'"
@@ -143,6 +145,6 @@ Set-Location $RepoRoot
 
 Write-Host ""
 Write-Host "Jupyter exited. Log saved at: $LogFile" -ForegroundColor Yellow
-try { Stop-Transcript | Out-Host } catch {}
+try { Stop-Transcript | Out-Null } catch {}
 Write-Host "Press Enter to close..." -ForegroundColor Yellow
 [void](Read-Host)
