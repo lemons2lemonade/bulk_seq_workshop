@@ -131,7 +131,7 @@ if (-not $Conda -and (Test-Path $CondaExe)) {
 if (-not $Conda) {
 
   # If our target dir exists but conda.exe is missing, it's a partial install -> quarantine it
-  if (Test-Path $MiniforgeDir -and !(Test-Path $CondaExe)) {
+  if ((Test-Path $MiniforgeDir) -and !(Test-Path $CondaExe)) {
     Write-Host "Detected partial Miniforge at target location (missing conda.exe)." -ForegroundColor Yellow
     Quarantine-Dir $MiniforgeDir
   }
