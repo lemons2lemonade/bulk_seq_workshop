@@ -14,7 +14,7 @@ $LogDir = Join-Path $env:TEMP "bulk_seq_workshop_logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 # Workshop-safe, no-space install root for Miniforge
-$ToolsRoot = "C:\Tools"
+$ToolsRoot    = "C:\Tools"
 $MiniforgeDir = Join-Path $ToolsRoot "miniforge3"
 New-Item -ItemType Directory -Force -Path $ToolsRoot | Out-Null
 
@@ -113,9 +113,9 @@ try {
   throw "Network/DNS check failed: cannot resolve github.com."
 }
 
-$TOTAL = 6
+$TOTAL = 5
 
-# Step 1/6: Ensure conda (install Miniforge if missing)
+# Step 1/5: Ensure conda (install Miniforge if missing)
 Step 1 $TOTAL "Ensuring conda is available (Miniforge if needed)"
 
 # Paths that may exist from older attempts (often with spaces in user profile)
@@ -193,64 +193,26 @@ Write-Host "Using conda: $Conda"
 & $Conda --version | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "conda version check failed (exit code $LASTEXITCODE)" }
 
-# Step 2/6: Ensure mamba (install only if missing)
-Step 2 $TOTAL "Ensuring mamba is available (install only if missing)"
-
-function Find-Mamba([string]$BasePrefix) {
-  $candidates = @(
-    (Join-Path $BasePrefix "Scripts\mamba.exe"),
-    (Join-Path $BasePrefix "Library\bin\mamba.exe"),
-    (Join-Path $BasePrefix "condabin\mamba.bat")
-  )
-  foreach ($c in $candidates) {
-    if (Test-Path $c) { return $c }
-  }
-  return $null
-}
+# Step 2/5: Create/update env (conda env for maximum compatibility)
+Step 2 $TOTAL "Creating/updating env '$EnvName' (can take a few minutes)"
 
 $BasePrefix = & $Conda info --base
-$Mamba = $null
-
-if (Get-Command mamba -ErrorAction SilentlyContinue) {
-  $Mamba = "mamba"
-} else {
-  $Mamba = Find-Mamba $BasePrefix
-  if (-not $Mamba) {
-    Write-Host "mamba not found - installing into base env"
-    Run-Exe "conda install mamba" $Conda @("install","-n","base","-c","conda-forge","-y","mamba")
-    $Mamba = Find-Mamba $BasePrefix
-    if (-not $Mamba) {
-      throw "mamba install reported success but executable was not found under base prefix: $BasePrefix"
-    }
-  }
-}
-
-Write-Host "Using solver: $Mamba"
-& $Mamba --version | Out-Host
-if ($LASTEXITCODE -ne 0) { throw "mamba version check failed (exit code $LASTEXITCODE)" }
-
-# Step 3/6: Create/update env
-Step 3 $TOTAL "Creating/updating env '$EnvName' (can take a few minutes)"
-
-$EnvPrefix = Join-Path $BasePrefix ("envs\{0}" -f $EnvName)
+$EnvPrefix  = Join-Path $BasePrefix ("envs\{0}" -f $EnvName)
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $EnvPrefix) | Out-Null
 
-# IMPORTANT: YAML already contains name: rpkm-workshop
-# Use -f only; do NOT pass -n (prevents name mismatch issues)
 if (Test-Path $EnvPrefix) {
   Write-Host "Environment exists at: $EnvPrefix"
-  Run-Exe "mamba env update" $Mamba @("env","update","-f",$EnvYml,"--prune")
+  Run-Exe "conda env update" $Conda @("env","update","-n",$EnvName,"-f",$EnvYml,"--prune")
 } else {
   Write-Host "Environment not found; creating from YAML: $EnvYml"
-  Run-Exe "mamba env create" $Mamba @("env","create","-f",$EnvYml)
+  Run-Exe "conda env create" $Conda @("env","create","-f",$EnvYml)
 }
 
-if (!(Test-Path $EnvPrefix)) {
-  throw "Environment creation/update did not produce expected prefix: $EnvPrefix"
-}
+# Verify environment is runnable (avoid relying on prefix assumptions)
+Run-Exe "conda run sanity" $Conda @("run","-n",$EnvName,"python","-c","import sys; print('Python OK:', sys.version.split()[0])")
 
-# Step 4/6: Smoke test + triage printout
-Step 4 $TOTAL "Smoke test + triage printout"
+# Step 3/5: Smoke test + triage printout
+Step 3 $TOTAL "Smoke test + triage printout"
 
 $SmokePy = Join-Path $TmpRoot "bulk_seq_workshop_smoke_test.py"
 $SmokeLines = @(
@@ -273,19 +235,15 @@ $SmokeLines = @(
   'print("statsmodels:", statsmodels.__version__)'
 )
 Set-Content -Path $SmokePy -Value $SmokeLines -Encoding UTF8
-
 Run-Exe "conda run smoke test" $Conda @("run","-n",$EnvName,"python",$SmokePy)
 
-# Step 5/6: Register kernel
-Step 5 $TOTAL "Registering Jupyter kernel '$EnvName'"
+# Step 4/5: Register kernel
+Step 4 $TOTAL "Registering Jupyter kernel '$EnvName'"
 Run-Exe "ipykernel install" $Conda @("run","-n",$EnvName,"python","-m","ipykernel","install","--user","--name",$EnvName,"--display-name",$EnvName)
 
-# Step 6/6: Launch JupyterLab + notebook
-Step 6 $TOTAL "Launching JupyterLab + opening notebooks/workshop.ipynb"
+# Step 5/5: Launch JupyterLab + notebook
+Step 5 $TOTAL "Launching JupyterLab + opening notebooks/workshop.ipynb"
 Write-Host ""
-
-Run-Exe "conda run sanity" $Conda @("run","-n",$EnvName,"python","-c","import sys; print('Python OK:', sys.version.split()[0])")
-
 Write-Host "SUCCESS - Environment ready. Launching the notebook now..." -ForegroundColor Green
 
 Set-Location $RepoRoot
