@@ -53,6 +53,13 @@ Write-Host "Env file:  $EnvYml"
 Write-Host "Notebook:  $Notebook"
 Write-Host ("PowerShell: {0}" -f $PSVersionTable.PSVersion)
 
+# --- Guard: do not run as Administrator (workshop installs per-user) ---
+$IsAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
+           ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if ($IsAdmin) {
+  throw "Please do NOT run as Administrator. Close this window and run setup_windows.bat normally (per-user install)."
+}
+
 # --- DNS sanity check ---
 try {
   $null = Resolve-DnsName "github.com" -ErrorAction Stop
@@ -115,19 +122,22 @@ Step 3 $TOTAL "Creating/updating env 'rpkm-workshop' (can take a few minutes)"
 
 # Step 4/6: Smoke test + triage printout (via temp .py to avoid quoting issues)
 Step 4 $TOTAL "Smoke test + triage printout"
+
 $SmokePy = Join-Path $env:TEMP "bulk_seq_workshop_smoke_test.py"
-@"
+
+@'
 import sys, platform
 import numpy, pandas, scipy, sklearn, matplotlib
+
 print("SMOKE TEST OK")
-print("PY:", sys.version.replace("\\n"," "))
+print("PY:", sys.version.replace("\n"," "))
 print("PLATFORM:", platform.platform())
 print("numpy:", numpy.__version__)
 print("pandas:", pandas.__version__)
 print("scipy:", scipy.__version__)
 print("sklearn:", sklearn.__version__)
 print("matplotlib:", matplotlib.__version__)
-"@ | Set-Content -Encoding UTF8 $SmokePy
+'@ | Set-Content -Encoding UTF8 $SmokePy
 
 & $Conda run -n rpkm-workshop python $SmokePy | Out-Host
 
