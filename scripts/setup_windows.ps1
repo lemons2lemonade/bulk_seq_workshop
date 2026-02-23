@@ -186,22 +186,50 @@ Write-Host "Using conda: $Conda"
 
 # Step 2/6: Ensure mamba (install only if missing)
 Step 2 $TOTAL "Ensuring mamba is available (install only if missing)"
+
+function Find-Mamba([string]$BasePrefix) {
+  $candidates = @(
+    (Join-Path $BasePrefix "Scripts\mamba.exe"),
+    (Join-Path $BasePrefix "Library\bin\mamba.exe"),
+    (Join-Path $BasePrefix "condabin\mamba.bat"),
+    (Join-Path $BasePrefix "Scripts\micromamba.exe"),
+    (Join-Path $BasePrefix "Library\bin\micromamba.exe")
+  )
+  foreach ($c in $candidates) {
+    if (Test-Path $c) { return $c }
+  }
+  return $null
+}
+
 $Mamba = $null
+
+# If mamba is already on PATH, use it
 if (Get-Command mamba -ErrorAction SilentlyContinue) {
   $Mamba = "mamba"
 } else {
   $BasePrefix = & $Conda info --base
-  $Candidate  = Join-Path $BasePrefix "Scripts\mamba.exe"
-  if (Test-Path $Candidate) {
-    $Mamba = $Candidate
-  } else {
+  $Mamba = Find-Mamba $BasePrefix
+
+  if (-not $Mamba) {
     Write-Host "mamba not found - installing into base env"
     & $Conda install -n base -c conda-forge -y mamba | Out-Host
-    if (Test-Path $Candidate) { $Mamba = $Candidate } else { throw "mamba installation failed" }
+
+    # Re-check after install
+    $Mamba = Find-Mamba $BasePrefix
+    if (-not $Mamba) {
+      # Try installing micromamba as a backup (very common on conda-forge)
+      Write-Host "mamba still not found - trying micromamba fallback" -ForegroundColor Yellow
+      & $Conda install -n base -c conda-forge -y micromamba | Out-Host
+      $Mamba = Find-Mamba $BasePrefix
+    }
+
+    if (-not $Mamba) {
+      throw "mamba/micromamba install completed but executable was not found under base prefix: $BasePrefix"
+    }
   }
 }
 
-Write-Host "Using mamba: $Mamba"
+Write-Host "Using solver: $Mamba"
 & $Mamba --version | Out-Host
 
 # Step 3/6: Create/update env
