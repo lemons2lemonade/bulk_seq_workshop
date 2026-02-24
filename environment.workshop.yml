@@ -23,6 +23,7 @@ dependencies:
   # Plotting
   - matplotlib
   - seaborn
+  - plotly
 
   # Notebooks
   - jupyter
