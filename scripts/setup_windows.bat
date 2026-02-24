@@ -1,47 +1,35 @@
 ﻿@echo off
-setlocal EnableExtensions
+setlocal enabledelayedexpansion
 
-REM Move to repo root (parent of scripts/)
-cd /d "%~dp0.."
+REM Run setup script from this folder, regardless of where user double-clicks from.
+set "SCRIPT_DIR=%~dp0"
+set "PS1=%SCRIPT_DIR%setup_windows.ps1"
 
 echo ============================================================
 echo Bulk-seq workshop setup (Windows)
-echo Repo root: %CD%
 echo ============================================================
+echo [BAT] Script: "%PS1%"
 echo.
 
-set "PS1=%CD%\scripts\setup_windows.ps1"
+REM Use Windows PowerShell 5.1 explicitly (works everywhere)
+set "PWSH=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 if not exist "%PS1%" (
-  echo [BAT] ERROR: setup_windows.ps1 not found at:
-  echo       "%PS1%"
-  echo.
-  pause
+  echo ERROR: Cannot find "%PS1%"
+  echo Press any key to exit...
+  pause >nul
   exit /b 1
 )
 
-REM Prefer Windows PowerShell 5.1 (always present) for max compatibility
-set "PSEXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+REM Unblock the PS1 in case it came from the internet/zip
+echo [BAT] Unblocking PS1 (if needed)...
+%PWSH% -NoProfile -Command "try { Unblock-File -Path '%PS1%' -ErrorAction SilentlyContinue } catch {}" >nul 2>nul
 
-echo [BAT] PowerShell:
-echo       %PSEXE%
-echo.
-echo [BAT] launching setup_windows.ps1...
+echo [BAT] Launching PowerShell...
 echo.
 
-"%PSEXE%" -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
-
-set "EC=%ERRORLEVEL%"
-if not "%EC%"=="0" (
-  echo.
-  echo [BAT] Setup exited with code %EC%.
-  echo [BAT] If a window closed too fast, run this BAT from cmd.exe to see output.
-  echo.
-  pause
-  exit /b %EC%
-)
+%PWSH% -NoProfile -ExecutionPolicy Bypass -NoExit -File "%PS1%"
 
 echo.
-echo [BAT] Setup completed successfully.
-pause
-exit /b 0
+echo [BAT] PowerShell exited. Press any key to close...
+pause >nul
