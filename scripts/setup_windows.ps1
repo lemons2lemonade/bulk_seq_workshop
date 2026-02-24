@@ -82,15 +82,86 @@ function Run-Exe([string]$Label, [string]$Exe, [string[]]$Args) {
   }
 }
 
+function Start-JupyterAndOpenBrowser([string]$Conda, [string]$EnvName, [string]$RepoRoot, [string]$Notebook, [string]$LogDir) {
+  $JupyterLog = Join-Path $LogDir ("jupyter_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
+  Write-Host ""
+  Write-Host "Jupyter log: $JupyterLog" -ForegroundColor Yellow
+  Write-Host "Starting JupyterLab and opening browser..." -ForegroundColor Green
+
+  # Use no-browser so we can explicitly open the URL ourselves (more reliable on Windows).
+  # Disable token for workshop ease; change/remove if you want security.
+  $args = @(
+    "run","-n",$EnvName,"jupyter","lab",
+    "--ip=127.0.0.1",
+    "--port=8888",
+    "--ServerApp.port_retries=50",
+    "--no-browser",
+    "--NotebookApp.token=",
+    "--notebook-dir=$RepoRoot",
+    $Notebook
+  )
+
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $Conda
+  $psi.Arguments = ($args | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join " "
+  $psi.WorkingDirectory = $RepoRoot
+  $psi.UseShellExecute = $false
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.CreateNoWindow = $false
+
+  $p = New-Object System.Diagnostics.Process
+  $p.StartInfo = $psi
+  $null = $p.Start()
+
+  # Capture output briefly to detect the URL if printed; else use default URL
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
+  $url = $null
+
+  while ($sw.Elapsed.TotalSeconds -lt 12 -and -not $p.HasExited) {
+    while (-not $p.StandardOutput.EndOfStream) {
+      $line = $p.StandardOutput.ReadLine()
+      Add-Content -Path $JupyterLog -Value $line
+      if (-not $url -and $line -match '(http://127\.0\.0\.1:\d+/\S*)') { $url = $Matches[1] }
+    }
+    while (-not $p.StandardError.EndOfStream) {
+      $eline = $p.StandardError.ReadLine()
+      Add-Content -Path $JupyterLog -Value $eline
+      if (-not $url -and $eline -match '(http://127\.0\.0\.1:\d+/\S*)') { $url = $Matches[1] }
+    }
+    Start-Sleep -Milliseconds 200
+  }
+
+  if (-not $url) { $url = "http://127.0.0.1:8888/lab" }
+
+  Write-Host ""
+  Write-Host "Open this in your browser:" -ForegroundColor Cyan
+  Write-Host $url -ForegroundColor Cyan
+  Write-Host ""
+
+  try {
+    Start-Process $url | Out-Null
+    Write-Host "Browser launch attempted." -ForegroundColor Green
+  } catch {
+    Write-Host "Could not auto-open browser. Please copy/paste the URL above." -ForegroundColor Yellow
+  }
+
+  Write-Host ""
+  Write-Host "Jupyter is running. Close your browser when finished." -ForegroundColor Yellow
+  Write-Host "You can also close this window (or press Ctrl+C) to stop Jupyter." -ForegroundColor Yellow
+
+  $p.WaitForExit()
+  Write-Host ""
+  Write-Host "Jupyter exited. Jupyter log: $JupyterLog" -ForegroundColor Yellow
+}
+
 # --- Paths & inputs ---
 $EnvYml   = Join-Path $RepoRoot "environment.workshop.yml"
 $Notebook = Join-Path $RepoRoot "notebooks\workshop.ipynb"
+$EnvName  = "rpkm-workshop"
 
 if (!(Test-Path $EnvYml))   { throw "Missing environment file: $EnvYml" }
 if (!(Test-Path $Notebook)) { throw "Missing notebook: $Notebook" }
-
-# Environment name MUST match environment.workshop.yml "name:"
-$EnvName = "rpkm-workshop"
 
 Banner "Workshop setup (Windows) - automatic install + env + Jupyter"
 Write-Host "Repo root: $RepoRoot"
@@ -118,36 +189,27 @@ $TOTAL = 5
 # Step 1/5: Ensure conda (install Miniforge if missing)
 Step 1 $TOTAL "Ensuring conda is available (Miniforge if needed)"
 
-# Paths that may exist from older attempts (often with spaces in user profile)
 $UserProfileMiniforge = Join-Path $env:USERPROFILE "miniforge3"
 $UserProfileMambaforge = Join-Path $env:USERPROFILE "mambaforge"
 $UserProfileMiniconda  = Join-Path $env:USERPROFILE "miniconda3"
 $UserProfileAnaconda   = Join-Path $env:USERPROFILE "anaconda3"
 
-# Target no-space install
 $CondaExe = Join-Path $MiniforgeDir "Scripts\conda.exe"
 
-# 1) If conda is already on PATH, use it and skip install
 $Conda = $null
 if (Get-Command conda -ErrorAction SilentlyContinue) {
   $Conda = "conda"
 }
-
-# 2) Otherwise, if our target conda exists, use it
 if (-not $Conda -and (Test-Path $CondaExe)) {
   $Conda = $CondaExe
 }
 
-# 3) Otherwise, clean up known-bad leftovers and install fresh into C:\Tools\miniforge3
 if (-not $Conda) {
-
-  # If our target dir exists but conda.exe is missing, it's a partial install -> quarantine it
   if ((Test-Path $MiniforgeDir) -and !(Test-Path $CondaExe)) {
     Write-Host "Detected partial Miniforge at target location (missing conda.exe)." -ForegroundColor Yellow
     Quarantine-Dir $MiniforgeDir
   }
 
-  # Quarantine old user-profile installs
   foreach ($p in @($UserProfileMiniforge, $UserProfileMambaforge, $UserProfileMiniconda, $UserProfileAnaconda)) {
     if (Test-Path $p) {
       Write-Host "Detected old conda install in user profile: $p" -ForegroundColor Yellow
@@ -158,11 +220,8 @@ if (-not $Conda) {
   Write-Host "conda not found - installing Miniforge (no admin required)"
   Write-Host "Miniforge target: $MiniforgeDir"
 
-  if ($MiniforgeDir -match "\s") {
-    throw "Internal error: MiniforgeDir contains spaces: $MiniforgeDir"
-  }
+  if ($MiniforgeDir -match "\s") { throw "Internal error: MiniforgeDir contains spaces: $MiniforgeDir" }
 
-  # Download installer into our dedicated temp directory; re-download if suspiciously small
   $Installer = Join-Path $TmpRoot "Miniforge3-Windows-x86_64.exe"
   $Url = "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe"
 
@@ -193,9 +252,8 @@ Write-Host "Using conda: $Conda"
 & $Conda --version | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "conda version check failed (exit code $LASTEXITCODE)" }
 
-# Step 2/5: Create/update env (conda env for maximum compatibility)
+# Step 2/5: Create/update env
 Step 2 $TOTAL "Creating/updating env '$EnvName' (can take a few minutes)"
-
 $BasePrefix = & $Conda info --base
 $EnvPrefix  = Join-Path $BasePrefix ("envs\{0}" -f $EnvName)
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $EnvPrefix) | Out-Null
@@ -208,12 +266,10 @@ if (Test-Path $EnvPrefix) {
   Run-Exe "conda env create" $Conda @("env","create","-f",$EnvYml)
 }
 
-# Verify environment is runnable (avoid relying on prefix assumptions)
 Run-Exe "conda run sanity" $Conda @("run","-n",$EnvName,"python","-c","import sys; print('Python OK:', sys.version.split()[0])")
 
 # Step 3/5: Smoke test + triage printout
 Step 3 $TOTAL "Smoke test + triage printout"
-
 $SmokePy = Join-Path $TmpRoot "bulk_seq_workshop_smoke_test.py"
 $SmokeLines = @(
   'import sys, platform',
@@ -241,16 +297,16 @@ Run-Exe "conda run smoke test" $Conda @("run","-n",$EnvName,"python",$SmokePy)
 Step 4 $TOTAL "Registering Jupyter kernel '$EnvName'"
 Run-Exe "ipykernel install" $Conda @("run","-n",$EnvName,"python","-m","ipykernel","install","--user","--name",$EnvName,"--display-name",$EnvName)
 
-# Step 5/5: Launch JupyterLab + notebook
+# Step 5/5: Launch + auto-open in browser
 Step 5 $TOTAL "Launching JupyterLab + opening notebooks/workshop.ipynb"
 Write-Host ""
 Write-Host "SUCCESS - Environment ready. Launching the notebook now..." -ForegroundColor Green
 
 Set-Location $RepoRoot
-Run-Exe "jupyter lab" $Conda @("run","-n",$EnvName,"jupyter","lab",$Notebook)
+Start-JupyterAndOpenBrowser -Conda $Conda -EnvName $EnvName -RepoRoot $RepoRoot -Notebook $Notebook -LogDir $LogDir
 
 Write-Host ""
-Write-Host "Jupyter exited. Log saved at: $LogFile" -ForegroundColor Yellow
+Write-Host "Setup complete. Log saved at: $LogFile" -ForegroundColor Yellow
 try { Stop-Transcript | Out-Null } catch {}
 Write-Host "Press Enter to close..." -ForegroundColor Yellow
 [void](Read-Host)
