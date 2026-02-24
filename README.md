@@ -5,7 +5,7 @@
 This workshop leverages control-only bulk RNA-seq's higher-level, holistic traits while avoiding the following pitfalls:
 1. Treating bulk-seq. contents as TPM or UMI counts
 2. Using bulk-seq. as a ground truth for log-fold-change, 
-3. Using bulk-seq. to compare absolute expression values against this data 
+3. Using bulk-seq. to compare absolute expression values against those of external snRNA-seq. datasets.
 4. Using bulk-seq. for finding DEGs. 
 
 The core idea is simple:
