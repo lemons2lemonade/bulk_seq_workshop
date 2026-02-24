@@ -30,7 +30,7 @@ Conceptual Pipeline
     * state inference
     * trajectory analysis
     * differential expression
-    * contrast-based interpretation (e.g. “bam-ness”)
+    * contrast-based interpretation (e.g. “gsc-likenes (by looking at bam-knockout sample)”)
 
 Bulk PCA is treated as a reference manifold here.
 
