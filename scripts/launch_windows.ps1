@@ -1,8 +1,12 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-# --- Always-on logging ---
+# --- Resolve paths early ---
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot  = Resolve-Path (Join-Path $ScriptDir "..") | Select-Object -ExpandProperty Path
+
+# --- Logging ---
 $LogDir = Join-Path $env:TEMP "bulk_seq_workshop_logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $LogFile = Join-Path $LogDir ("launch_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
@@ -12,7 +16,7 @@ Write-Host "Logging to: $LogFile"
 trap {
   Write-Host ""
   Write-Host "==============================================" -ForegroundColor Red
-  Write-Host "LAUNCH FAILED ❌" -ForegroundColor Red
+  Write-Host "LAUNCH FAILED" -ForegroundColor Red
   Write-Host "==============================================" -ForegroundColor Red
   Write-Host $_.Exception.Message -ForegroundColor Red
   Write-Host ""
@@ -30,53 +34,46 @@ function Banner([string]$msg) {
   Write-Host "============================================================"
 }
 
-# --- Guard: do not run as Administrator ---
-$IsAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
-           ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if ($IsAdmin) {
-  throw "Please do NOT run as Administrator. Close this window and run launch_windows.bat normally."
+function Run-Exe([string]$Label, [string]$Exe, [string[]]$Args) {
+  Write-Host ">> $Label"
+  & $Exe @Args | Out-Host
+  if ($LASTEXITCODE -ne 0) { throw "$Label failed (exit code $LASTEXITCODE)" }
 }
-
-# --- Resolve repo + notebook ---
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot  = Resolve-Path (Join-Path $ScriptDir "..") | Select-Object -ExpandProperty Path
 
 $EnvName  = "rpkm-workshop"
 $Notebook = Join-Path $RepoRoot "notebooks\workshop.ipynb"
 
-if (!(Test-Path $Notebook)) { throw "Missing notebook: $Notebook" }
-
-Banner "Launching workshop notebook (Windows)"
+Banner "Workshop launch (Windows) - JupyterLab"
 Write-Host "Repo root: $RepoRoot"
 Write-Host "Notebook:  $Notebook"
+Write-Host ("PowerShell: {0}" -f $PSVersionTable.PSVersion)
 
-# --- Find conda (prefer PATH, fallback to Miniforge default) ---
-$MiniforgeDir = Join-Path $env:USERPROFILE "miniforge3"
-$CondaExe     = Join-Path $MiniforgeDir "Scripts\conda.exe"
+if (!(Test-Path $Notebook)) {
+  throw "Notebook not found: $Notebook"
+}
 
+# --- Find conda (prefer our known Miniforge install) ---
 $Conda = $null
-if (Get-Command conda -ErrorAction SilentlyContinue) {
-  $Conda = "conda"
-} elseif (Test-Path $CondaExe) {
+$CondaExe = "C:\Tools\miniforge3\Scripts\conda.exe"
+
+if (Test-Path $CondaExe) {
   $Conda = $CondaExe
+} elseif (Get-Command conda -ErrorAction SilentlyContinue) {
+  $Conda = "conda"
 } else {
   throw "conda not found. Please run scripts\setup_windows.bat first."
 }
 
 Write-Host "Using conda: $Conda"
 & $Conda --version | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "conda --version failed (exit code $LASTEXITCODE)" }
 
-# --- Check env exists ---
-$EnvList = & $Conda env list
-if ($EnvList -notmatch "^\s*$EnvName\s") {
-  throw "Conda env '$EnvName' not found. Please run scripts\setup_windows.bat first."
-}
+# Quick sanity: env exists and can run python
+Run-Exe "conda run sanity" $Conda @("run","-n",$EnvName,"python","-c","import sys; print('Python OK:', sys.version.split()[0])")
 
-# --- Launch ---
+# Launch JupyterLab
 Set-Location $RepoRoot
-Write-Host ""
-Write-Host "Launching JupyterLab..." -ForegroundColor Green
-& $Conda run -n $EnvName jupyter lab $Notebook
+Run-Exe "jupyter lab" $Conda @("run","-n",$EnvName,"jupyter","lab",$Notebook)
 
 Write-Host ""
 Write-Host "Jupyter exited. Log saved at: $LogFile" -ForegroundColor Yellow

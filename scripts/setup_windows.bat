@@ -1,27 +1,47 @@
-@echo off
-setlocal
-cd /d "%~dp0\.."
+﻿@echo off
+setlocal EnableExtensions
+
+REM Move to repo root (parent of scripts/)
+cd /d "%~dp0.."
 
 echo ============================================================
 echo Bulk-seq workshop setup (Windows)
-echo Repo root: %cd%
+echo Repo root: %CD%
 echo ============================================================
 echo.
 
-echo [BAT] powershell location:
-where powershell
-echo.
+set "PS1=%CD%\scripts\setup_windows.ps1"
 
+if not exist "%PS1%" (
+  echo [BAT] ERROR: setup_windows.ps1 not found at:
+  echo       "%PS1%"
+  echo.
+  pause
+  exit /b 1
+)
+
+REM Prefer Windows PowerShell 5.1 (always present) for max compatibility
+set "PSEXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+echo [BAT] PowerShell:
+echo       %PSEXE%
+echo.
 echo [BAT] launching setup_windows.ps1...
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -NoExit -Command ^
-  "& { ^
-      Write-Host '[PS] Starting setup...' -ForegroundColor Cyan; ^
-      Write-Host ('[PS] Script path: {0}' -f (Resolve-Path '.\scripts\setup_windows.ps1')) -ForegroundColor Cyan; ^
-      & .\scripts\setup_windows.ps1 ^
-    }"
+"%PSEXE%" -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
+
+set "EC=%ERRORLEVEL%"
+if not "%EC%"=="0" (
+  echo.
+  echo [BAT] Setup exited with code %EC%.
+  echo [BAT] If a window closed too fast, run this BAT from cmd.exe to see output.
+  echo.
+  pause
+  exit /b %EC%
+)
 
 echo.
-echo [BAT] PowerShell process returned (unexpected). Press any key to close.
-pause >nul
+echo [BAT] Setup completed successfully.
+pause
+exit /b 0
